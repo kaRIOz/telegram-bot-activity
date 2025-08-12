@@ -1,55 +1,81 @@
-require("dotenv").config();
+export default {
+  async fetch(request, env, ctx) {
+    // هندل پیام‌های تلگرام (Webhook)
+    if (request.method === "POST") {
+      const msg = await request.json();
+      await handleMessage(msg, env);
+      return new Response("OK");
+    }
+    return new Response("Hello from Telegram bot Worker");
+  },
 
-const TelegramBot = require("node-telegram-bot-api");
-const schedule = require("node-schedule");
-// توکن ربات که از BotFather میگیری
-const token = process.env.BOT_TOKEN;
-const bot = new TelegramBot(token, { polling: true });
+  async scheduled(event, env, ctx) {
+    // کرون تریگر هر روز ساعت 19:30 UTC معادل 23:00 ایران
+    const ranking = await getRanking(env);
+    const chatId = await env.MESSAGE_COUNT.get("groupChatId");
 
-// آبجکت برای ذخیره شمارش پیام‌ها
-let messageCount = {};
+    if (chatId && ranking) {
+      await sendMessage(
+        env.BOT_TOKEN,
+        chatId,
+        `📊 رتبه‌بندی امروز:\n${ranking}`
+      );
+    }
 
-// گرفتن پیام‌ها و شمارش
-bot.on("message", (msg) => {
-  if (!msg.chat || msg.chat.type !== "group") return;
+    // پاک کردن آمار روزانه
+    const keys = await env.MESSAGE_COUNT.list();
+    for (const key of keys.keys) {
+      if (key.name !== "groupChatId") {
+        await env.MESSAGE_COUNT.delete(key.name);
+      }
+    }
+  },
+};
 
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const userName = msg.from.first_name || msg.from.username || "ناشناس";
+async function handleMessage(msg, env) {
+  if (!msg.message || !msg.message.chat || msg.message.chat.type !== "group")
+    return;
 
-  // شمارش پیام کاربر
-  if (!messageCount[userId]) {
-    messageCount[userId] = { name: userName, count: 0 };
-  }
-  messageCount[userId].count++;
-});
+  const chatId = msg.message.chat.id.toString();
+  await env.MESSAGE_COUNT.put("groupChatId", chatId);
 
-// تابع رتبه‌بندی
-function getRanking() {
-  let ranking = Object.values(messageCount)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10)
-    .map((user, index) => `${index + 1} - ${user.name} (${user.count})`)
-    .join("\n");
+  const userId = msg.message.from.id.toString();
+  const userName =
+    msg.message.from.first_name || msg.message.from.username || "ناشناس";
 
-  if (!ranking) ranking = "هیچ پیامی ثبت نشده است.";
+  const prev = await env.MESSAGE_COUNT.get(userId);
+  let data = prev ? JSON.parse(prev) : { name: userName, count: 0 };
+  data.name = userName; // آپدیت نام کاربر
+  data.count += 1;
 
-  return ranking;
+  await env.MESSAGE_COUNT.put(userId, JSON.stringify(data));
 }
 
-// ارسال رتبه‌بندی با دستور /rank
-bot.onText(/\/rank/, (msg) => {
-  const chatId = msg.chat.id;
-  bot.sendMessage(chatId, "🏆 رتبه‌بندی:\n" + getRanking());
-});
+async function getRanking(env) {
+  const keys = await env.MESSAGE_COUNT.list();
+  const users = [];
 
-// ارسال خودکار ساعت ۲۳:۰۰ هر شب
-schedule.scheduleJob("0 23 * * *", () => {
-  // فرض: فقط روی همین گروه اجرا میشه
-  // اگر چند گروه داری باید chatId رو ذخیره کنی
-  const rankingMessage = "📊 رتبه‌بندی امروز:\n" + getRanking();
-  bot.sendMessage(GROUP_CHAT_ID, rankingMessage);
+  for (const key of keys.keys) {
+    if (key.name !== "groupChatId") {
+      const data = JSON.parse(await env.MESSAGE_COUNT.get(key.name));
+      users.push(data);
+    }
+  }
 
-  // پاک کردن آمار روزانه
-  messageCount = {};
-});
+  if (users.length === 0) return "هیچ پیامی ثبت نشده است.";
+
+  users.sort((a, b) => b.count - a.count);
+  return users
+    .slice(0, 10)
+    .map((u, i) => `${i + 1} - ${u.name} (${u.count})`)
+    .join("\n");
+}
+
+async function sendMessage(token, chatId, text) {
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
+}
