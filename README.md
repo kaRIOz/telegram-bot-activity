@@ -62,7 +62,7 @@ The /rank command shows the current ranking instantly.
 * 1 - Alice (52)
 * 2 - Bob (46)
 * 3 - Charlie (33)
-🧩 Commands
+* 🧩 Commands
 Command	Description
 /rank	Show current ranking
 
