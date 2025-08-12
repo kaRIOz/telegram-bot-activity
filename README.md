@@ -59,9 +59,9 @@ The /rank command shows the current ranking instantly.
 
 📄 Example Ranking Output
 🏆 Daily Ranking:
-1 - Alice (52)
-2 - Bob (46)
-3 - Charlie (33)
+* 1 - Alice (52)
+* 2 - Bob (46)
+* 3 - Charlie (33)
 🧩 Commands
 Command	Description
 /rank	Show current ranking
