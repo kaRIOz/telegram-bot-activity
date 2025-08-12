@@ -7,4 +7,4 @@ binding = "MESSAGE_COUNT"
 id = "26223536f94647148cda73c3c7e15e74"
 
 [triggers]
-crons = ["30 19 * * *"]  # 19:30 UTC = 23:00 IRST
+crons = ["0 20 * * *"]  # 19:30 UTC = 23:00 IRST
