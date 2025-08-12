@@ -1,6 +1,7 @@
+const GROUP_CHAT_ID = "1002795712236";
+
 export default {
-  async fetch(request, env, ctx) {
-    // هندل پیام‌های تلگرام (Webhook)
+  async fetch(request, env) {
     if (request.method === "POST") {
       const msg = await request.json();
       await handleMessage(msg, env);
@@ -9,35 +10,33 @@ export default {
     return new Response("Hello from Telegram bot Worker");
   },
 
-  async scheduled(event, env, ctx) {
-    // کرون تریگر هر روز ساعت 19:30 UTC معادل 23:00 ایران
+  async scheduled(event, env) {
     const ranking = await getRanking(env);
-    const chatId = await env.MESSAGE_COUNT.get("groupChatId");
 
-    if (chatId && ranking) {
+    if (ranking) {
       await sendMessage(
         env.BOT_TOKEN,
-        chatId,
+        GROUP_CHAT_ID,
         `📊 رتبه‌بندی امروز:\n${ranking}`
       );
     }
 
-    // پاک کردن آمار روزانه
+    // پاک کردن آمار روزانه (همه کلیدها به جز توکن و ثابت‌ها)
     const keys = await env.MESSAGE_COUNT.list();
     for (const key of keys.keys) {
-      if (key.name !== "groupChatId") {
-        await env.MESSAGE_COUNT.delete(key.name);
-      }
+      await env.MESSAGE_COUNT.delete(key.name);
     }
   },
 };
 
 async function handleMessage(msg, env) {
-  if (!msg.message || !msg.message.chat || msg.message.chat.type !== "group")
+  if (
+    !msg.message ||
+    !msg.message.chat ||
+    msg.message.chat.id.toString() !== GROUP_CHAT_ID
+  )
     return;
-
-  const chatId = msg.message.chat.id.toString();
-  await env.MESSAGE_COUNT.put("groupChatId", chatId);
+  if (msg.message.chat.type !== "group") return;
 
   const userId = msg.message.from.id.toString();
   const userName =
@@ -56,10 +55,9 @@ async function getRanking(env) {
   const users = [];
 
   for (const key of keys.keys) {
-    if (key.name !== "groupChatId") {
-      const data = JSON.parse(await env.MESSAGE_COUNT.get(key.name));
-      users.push(data);
-    }
+    if (key.name === "BOT_TOKEN") continue; // اگه این کلید ذخیره شده بود ازش رد شو
+    const data = JSON.parse(await env.MESSAGE_COUNT.get(key.name));
+    users.push(data);
   }
 
   if (users.length === 0) return "هیچ پیامی ثبت نشده است.";
