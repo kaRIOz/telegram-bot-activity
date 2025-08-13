@@ -2,7 +2,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // تست دستی رتبه‌بندی با این مسیر
+    // دستی تست کردن Cron
     if (url.pathname === "/test-cron") {
       await sendRanking(env);
       return new Response("Ranking sent manually!");
@@ -10,7 +10,6 @@ export default {
 
     if (request.method === "POST") {
       const update = await request.json();
-      console.log("Incoming update:", update);
 
       if (
         update.message &&
@@ -41,8 +40,6 @@ export default {
             count,
           })
         );
-
-        console.log(`Updated count for ${userName}: ${count}`);
       }
 
       return new Response("OK");
@@ -51,14 +48,18 @@ export default {
     return new Response("Hello from Worker!");
   },
 
-  async scheduled(event, env, ctx) {
-    console.log("Cron job triggered:", new Date().toISOString());
+  async scheduled(controller, env, ctx) {
     await sendRanking(env);
   },
 };
 
+// تابع ارسال رتبه‌بندی
 async function sendRanking(env) {
-  // گرفتن همه آمارها
+  console.log("Cron job triggered:", new Date().toISOString());
+
+  // صبر برای Sync شدن KV
+  await new Promise((res) => setTimeout(res, 10000));
+
   const keys = await env.MESSAGE_COUNT.list();
   let users = [];
 
@@ -69,7 +70,6 @@ async function sendRanking(env) {
     }
   }
 
-  // رتبه‌بندی
   let ranking = users
     .sort((a, b) => b.count - a.count)
     .map((u, i) => `${i + 1} - ${u.name} (${u.count})`)
@@ -77,7 +77,6 @@ async function sendRanking(env) {
 
   if (!ranking) ranking = "No messages recorded today.";
 
-  // ارسال به تلگرام
   const BOT_TOKEN = env.BOT_TOKEN;
   const GROUP_CHAT_ID = env.GROUP_CHAT_ID;
 
@@ -86,7 +85,7 @@ async function sendRanking(env) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: GROUP_CHAT_ID,
-      text: `📊 Daily Ranking:\n${ranking}`,
+      text: `📊 Ranking for last 24 hours:\n${ranking}`,
     }),
   });
 
@@ -95,5 +94,5 @@ async function sendRanking(env) {
     await env.MESSAGE_COUNT.delete(key.name);
   }
 
-  console.log("Daily ranking sent and stats cleared.");
+  console.log("Ranking sent and stats cleared.");
 }
