@@ -1,8 +1,8 @@
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
 
-    // دستی تست کردن Cron
+    // Endpoint برای تست دستی
     if (url.pathname === "/test-cron") {
       await sendRanking(env);
       return new Response("Ranking sent manually!");
@@ -10,6 +10,7 @@ export default {
 
     if (request.method === "POST") {
       const update = await request.json();
+      console.log("Incoming update:", update);
 
       if (
         update.message &&
@@ -17,28 +18,29 @@ export default {
         (update.message.chat.type === "group" ||
           update.message.chat.type === "supergroup")
       ) {
-        const userId = update.message.from.id;
+        const userId = update.message.from.id.toString();
         const userName =
           update.message.from.first_name ||
           update.message.from.username ||
           "Unknown";
 
-        let data = await env.MESSAGE_COUNT.get(userId.toString());
-        let count = 0;
+        // ابتدا از KV همه کاربران ثبت شده را بخوان
+        let usersData = await env.MESSAGE_COUNT.get("USERS_LIST");
+        let usersList = usersData ? JSON.parse(usersData) : {};
 
-        if (data) {
-          const parsed = JSON.parse(data);
-          count = parsed.count;
+        // اگر کاربر جدید بود، آبجکت بساز
+        if (!usersList[userId]) {
+          usersList[userId] = { id: userId, name: userName, message_count: 0 };
         }
 
-        count++;
+        // افزایش تعداد پیام
+        usersList[userId].message_count++;
 
-        await env.MESSAGE_COUNT.put(
-          userId.toString(),
-          JSON.stringify({
-            name: userName,
-            count,
-          })
+        // ذخیره در KV
+        await env.MESSAGE_COUNT.put("USERS_LIST", JSON.stringify(usersList));
+
+        console.log(
+          `Updated count for ${userName}: ${usersList[userId].message_count}`
         );
       }
 
@@ -48,31 +50,24 @@ export default {
     return new Response("Hello from Worker!");
   },
 
-  async scheduled(controller, env, ctx) {
+  async scheduled(controller, env) {
+    console.log("Cron job triggered:", new Date().toISOString());
     await sendRanking(env);
   },
 };
 
 // تابع ارسال رتبه‌بندی
 async function sendRanking(env) {
-  console.log("Cron job triggered:", new Date().toISOString());
+  const usersData = await env.MESSAGE_COUNT.get("USERS_LIST");
+  const usersList = usersData ? JSON.parse(usersData) : {};
 
-  // صبر برای Sync شدن KV
-  await new Promise((res) => setTimeout(res, 10000));
+  // تبدیل به آرایه و رتبه‌بندی
+  let users = Object.values(usersList);
+  users.sort((a, b) => b.message_count - a.message_count);
 
-  const keys = await env.MESSAGE_COUNT.list();
-  let users = [];
-
-  for (let key of keys.keys) {
-    const value = await env.MESSAGE_COUNT.get(key.name);
-    if (value) {
-      users.push(JSON.parse(value));
-    }
-  }
-
+  // ایجاد متن رتبه‌بندی حتی برای کسانی که 0 پیام فرستادن
   let ranking = users
-    .sort((a, b) => b.count - a.count)
-    .map((u, i) => `${i + 1} - ${u.name} (${u.count})`)
+    .map((u, i) => `${i + 1} - ${u.name} (${u.message_count})`)
     .join("\n");
 
   if (!ranking) ranking = "No messages recorded today.";
@@ -85,14 +80,16 @@ async function sendRanking(env) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: GROUP_CHAT_ID,
-      text: `📊 Ranking for last 24 hours:\n${ranking}`,
+      text: `📊 Daily Ranking:\n${ranking}`,
     }),
   });
 
-  // پاک کردن آمار روزانه
-  for (let key of keys.keys) {
-    await env.MESSAGE_COUNT.delete(key.name);
+  // پاک کردن آمار روزانه (اما آبجکت اعضا نگه داشته می‌شه)
+  let resetList = {};
+  for (let userId in usersList) {
+    resetList[userId] = { ...usersList[userId], message_count: 0 };
   }
+  await env.MESSAGE_COUNT.put("USERS_LIST", JSON.stringify(resetList));
 
-  console.log("Ranking sent and stats cleared.");
+  console.log("Daily ranking sent and stats cleared.");
 }
