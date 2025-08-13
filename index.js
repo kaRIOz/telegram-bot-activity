@@ -15,7 +15,8 @@ export default {
       if (
         update.message &&
         update.message.chat &&
-        update.message.chat.type === "group"
+        (update.message.chat.type === "group" ||
+          update.message.chat.type === "supergroup")
       ) {
         const userId = update.message.from.id;
         const userName =
